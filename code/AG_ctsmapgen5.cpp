@@ -14,11 +14,16 @@
 
 #include <sstream>
 #include <iostream>
+#include <vector>
 
 #include <cstring>
 
 #include <GenmapParams.h>
-#include "MathUtils.h"
+#include <MathUtils.h>
+
+#include <DBAstro.h>
+#include <Astro.h>
+#include <Freeze/Freeze.h>
 
 
 using namespace std;
@@ -191,19 +196,28 @@ int calculateMaps(CtsGenParams & params)
     long naxes[2] = { mxdim, mxdim };   /* image is 300 pixels wide by 200 rows */
 
 	//accesso ai file: da sostituire qui con l'accesso al DBD
-    fitsfile * evtFits;
-    char tempname[FLEN_FILENAME];
+   /*fitsfile * evtFits;
+   char tempname[FLEN_FILENAME];
     strcpy(tempname, tmpnam(NULL));
     if ( fits_create_file(&evtFits, tempname, &status) != 0 ) {
         printf("Errore in apertura file %s\n",tempname);
         return status;
-    }
+    }*/
+	Ice::InitializationData initData;
+	initData.properties = Ice::createProperties();
+	initData.properties->load("config");
+
+	// Initialize the Communicator.
+	Ice::CommunicatorPtr communicator = Ice::initialize(initData);
+
+	// Create a Freeze database connection.
+	Freeze::ConnectionPtr connection = Freeze::createConnection(communicator, "db");
 
     const double obtlimit = 104407200.;
     if (params.tmin<obtlimit)
         status = 1005;
     else
-        status = addfile(evtFits, params);
+        //status = addfile(evtFits, params);
     std::cout << "AG_ctsmapgen0...................................addfile exiting STATUS : "<< status<< std::endl << std::endl ;
 
 	//creazione della mappa. Questo lo lasciamo così
@@ -216,19 +230,41 @@ int calculateMaps(CtsGenParams & params)
 	//tutte le parti che iniziano per fits_ vanno tolte.
 	//si fa qui la query a BDB che restituisce un vector<double> con il dato RA e un 
 	//vector<double> con il dato DEC
-    fits_movabs_hdu(evtFits, 2, NULL, &status);
-    fits_get_num_rows(evtFits, &nrows, &status);
+    //fits_movabs_hdu(evtFits, 2, NULL, &status);
+    //fits_get_num_rows(evtFits, &nrows, &status);
+
+	vector<double> ra,dec;
+	//The map
+	DBAgileEvt DBEvt(connection,"DBAgileEvt");
+	//The iterator
+	DBAgileEvt::iterator it;
+	//The evt vector
+	Astro::agileEvt agileEvt;
+
+	//populate ra and dec
+	//popolato con log_earth__ra e log_earth_dec
+	for(it=DBEvt.begin(); it != DBEvt.end(); ++it){
+		agileEvt = it->second;
+		ra.push_back(agileEvt[6]);
+		dec.push_back(agileEvt[5]);
+	}
+	nrows = ra.size();
+
+	
     cout << nrows << endl;
-    double ra, dec;
+    //double ra, dec;
     switch (params.projection) {
     case ARC:
         for (long k = 0; k<nrows; ++k) {
         	//sostituire tutto questo con l'accesso al singolo elemento k del vector<double>
-            fits_get_colnum(evtFits, 1, "RA", &numcol, &status);
-            fits_read_col(evtFits, TDOUBLE, numcol, k+1, 1, 1, NULL, &ra, NULL, &status);
-            fits_get_colnum(evtFits, 1, "DEC", &numcol, &status);
-            fits_read_col(evtFits, TDOUBLE, numcol, k+1, 1, 1, NULL, &dec, NULL, &status);
-            Euler(ra, dec, &l, &b, 1);
+            //fits_get_colnum(evtFits, 1, "RA", &numcol, &status);
+            //fits_read_col(evtFits, TDOUBLE, numcol, k+1, 1, 1, NULL, &ra, NULL, &status);
+            //fits_get_colnum(evtFits, 1, "DEC", &numcol, &status);
+            //fits_read_col(evtFits, TDOUBLE, numcol, k+1, 1, 1, NULL, &dec, NULL, &status);
+		
+		Euler(ra[k], dec[k], &l, &b, 1);
+            	//Euler(ra, dec, &l, &b, 1);
+
             l*=DEG2RAD;
             b*=DEG2RAD;
             the = sin(b)*sin(baa)+cos(b)*cos(baa)*cos(l-laa);
@@ -252,11 +288,14 @@ int calculateMaps(CtsGenParams & params)
         break;
     case AIT:
         for (long k = 0; k<nrows; ++k) {
-            fits_get_colnum(evtFits, 1, "RA", &numcol, &status);
-            fits_read_col(evtFits, TDOUBLE, numcol, k+1, 1, 1, NULL, &ra, NULL, &status);
-            fits_get_colnum(evtFits, 1, "DEC", &numcol, &status);
-            fits_read_col(evtFits, TDOUBLE, numcol, k+1, 1, 1, NULL, &dec, NULL, &status);
-            Euler(ra, dec, &l, &b, 1);
+            //fits_get_colnum(evtFits, 1, "RA", &numcol, &status);
+            //fits_read_col(evtFits, TDOUBLE, numcol, k+1, 1, 1, NULL, &ra, NULL, &status);
+            //fits_get_colnum(evtFits, 1, "DEC", &numcol, &status);
+            //fits_read_col(evtFits, TDOUBLE, numcol, k+1, 1, 1, NULL, &dec, NULL, &status);
+            //Euler(ra, dec, &l, &b, 1);
+
+		Euler(ra[k], dec[k], &l, &b, 1);
+
             l*=DEG2RAD;
             b*=DEG2RAD;
             the = sin(b)*sin(baa)+cos(b)*cos(baa)*cos(l-laa);
@@ -296,7 +335,7 @@ int calculateMaps(CtsGenParams & params)
 
     params.write_fits_header(mapFits, params.projection, status);
 
-    fits_delete_file(evtFits, &status);
+    //fits_delete_file(evtFits, &status);
     fits_close_file(mapFits, &status);
     return status;
 }
@@ -341,4 +380,3 @@ int main(int argC,char* argV[])
 
     return status;
 }
-
