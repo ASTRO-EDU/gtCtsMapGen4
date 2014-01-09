@@ -205,7 +205,7 @@ int calculateMaps(CtsGenParams & params)
     }*/
 	Ice::InitializationData initData;
 	initData.properties = Ice::createProperties();
-	initData.properties->load("config");
+	//initData.properties->load("config");
 
 	// Initialize the Communicator.
 	Ice::CommunicatorPtr communicator = Ice::initialize(initData);
@@ -244,12 +244,13 @@ int calculateMaps(CtsGenParams & params)
 	//populate ra and dec
 	//popolato con log_earth__ra e log_earth_dec
 	for(it=DBEvt.begin(); it != DBEvt.end(); ++it){
+		cout << it->first << endl;
 		agileEvt = it->second;
 		ra.push_back(agileEvt[6]);
 		dec.push_back(agileEvt[5]);
 	}
 	nrows = ra.size();
-
+	exit(0);
 	
     cout << nrows << endl;
     //double ra, dec;

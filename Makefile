@@ -73,6 +73,10 @@ endif
 #Set INCPATH to add the inclusion paths
 INCPATH = -I $(INCLUDE_DIR) 
 LIBS = -lstdc++
+ifneq (, $(findstring agile, $(LINKERENV)))
+        INCPATH += -I$(AGILE)/include
+        LIBS += -L$(AGILE)/lib -lagilesci -lgtcommon
+endif
 ifneq (, $(findstring ice, $(LINKERENV)))
         INCPATH += -I$(ICEDIR)/include
 endif
@@ -99,10 +103,6 @@ ifneq (, $(findstring wcs, $(LINKERENV)))
 	LIBS += -L$(AGILE)/lib -lagilewcs 
 endif
 
-ifneq (, $(findstring agile, $(LINKERENV)))
-        INCPATH += -I$(AGILE)/include
-	LIBS += -L$(AGILE)/lib -lagilesci -lgtcommon
-endif 
 
 
 #Insert the optional parameter to the compiler. The CFLAGS could be changed externally by the user
