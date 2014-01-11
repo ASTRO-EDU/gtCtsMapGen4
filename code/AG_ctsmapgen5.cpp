@@ -15,6 +15,7 @@
 #include <sstream>
 #include <iostream>
 #include <vector>
+#include <iomanip>
 
 #include <cstring>
 
@@ -25,6 +26,10 @@
 #include <Astro.h>
 #include <Freeze/Freeze.h>
 
+#include <AstroMap.h>
+
+#define SIMPLE_KEY
+#define COMPOSITE_KEY
 
 using namespace std;
 
@@ -49,119 +54,247 @@ string String(const Intervals& intvs)
     return str.str();
 }
 
-//questa è la funziona che contiene la query sui dati. Importante.
-//E' da rifare accedendo al BDB
-static string LogEvtString(const Intervals& intvs, double emin, double emax, double albrad, double fovradmax, double fovradmin, int phasecode, int filtercode)
+static bool LogEvtString(CtsGenParams params, vector<float>& ra, vector<float>& dec)
 {
 	//se Count() == 0 non si calcola la mappa
-    if (intvs.Count()<=0)
-        return string("");
-    stringstream str(ios_base::out);
-    str.precision(6);
-    //se Count() > 0 si calcola la mappa.
-    //se Count() > 1 allora abbiamo una lista di tempi Start() e Stop().
-    //per ora noi possiamo ignorare questo e considerare per semplicità solo un tstart ed un tstop.
-    
-    if (intvs.Count()==1)
-        str << "TIME >= " << fixed << intvs[0].Start() << " && TIME <= " << intvs[0].Stop();
-    else {
-        str << "( ";
-        const char* sep = "";
-        for (int i=0; i<intvs.Count(); ++i) {
-            str << sep << " ( TIME >= " << fixed << intvs[i].Start() << " && TIME <= " << intvs[i].Stop() << " )";
-            sep = " ||";
-        }
-        str << " )";
-    }
+    if (params.intervals.Count() <= 0)
+        return false;
 
-    str << " && ENERGY >= " << emin;
-    str << " && ENERGY <= " << emax;
-    str << " && PH_EARTH > " << albrad;
-    str << " && THETA < " << fovradmax;
-    str << " && THETA >= " << fovradmin;
+    Ice::InitializationData initData;
+	initData.properties = Ice::createProperties();
+	initData.properties->load("config");
 
-    if ((phasecode & 1) == 1)
-        str << " && PHASE .NE. 0";
-    if ((phasecode & 2) == 2)
-        str << " && PHASE .NE. 1";
-    if ((phasecode & 4) == 4)
-        str << " && PHASE .NE. 2";
-    if ((phasecode & 8) == 8)
-        str << " && PHASE .NE. 3";
-    if ((phasecode & 16) == 16)
-        str << " && PHASE .NE. 4";
+	// Initialize the Communicator.
+	Ice::CommunicatorPtr communicator = Ice::initialize(initData);
 
-    if ((filtercode & 1) == 1)
-        str << " && EVSTATUS .NE. 'L'";
-    if ((filtercode & 2) == 2)
-        str << " && EVSTATUS .NE. 'G'";
-    if ((filtercode & 4) == 4)
-        str << " && EVSTATUS .NE. 'S'";
+	// Create a Freeze database connection.
+	Freeze::ConnectionPtr connection = Freeze::createConnection(communicator, "dbagilesimple");
 
-    return str.str();
+	//The map
+	DBAgileEvt DBEvt(connection,"DBAgileEvt");
+	//The iterator
+	DBAgileEvt::iterator it;
+
+	#ifdef SIMPLE_KEY
+		//The evt vector
+		Astro::agileEvt agileEvt;
+		cout << "start query " << endl;
+		for(it=DBEvt.begin(); it != DBEvt.end(); ++it){
+			double time = it->first;
+			cout << setprecision(15) << time << " " << params.emin << " " << params.emax << " " << params.fovradmin << " " << params.fovradmax << " " << " " << params.albrad <<   " " << params.phasecode << " " << params.filtercode << endl;
+			if (params.intervals.Count() == 1) {
+				if (time >= params.intervals[0].Start() && time <= params.intervals[0].Stop()) {
+					agileEvt = it->second;
+					cout << "DB: " << agileEvt[4] << " " << agileEvt[3] << " " << agileEvt[2] << " " << agileEvt[1] << " " << agileEvt[0] << " " << endl;
+					if ((agileEvt[4] >= params.emin && agileEvt[4] <= params.emax) &&
+							(agileEvt[3] > params.albrad) &&
+							(agileEvt[2] < params.fovradmax && agileEvt[2] >= params.fovradmin) &&
+							(agileEvt[1] == params.phasecode) &&
+							(agileEvt[0] == params.filtercode)) {
+
+						//Condizioni soddisfatte
+						ra.push_back(agileEvt[6]);
+						dec.push_back(agileEvt[5]);
+						cout << "******************************************************" << endl;
+
+					}
+				}
+			} else {
+				bool inTime = false;
+				for (int i=0; i<params.intervals.Count(); ++i) {
+					if (time >= params.intervals[i].Start() && time <= params.intervals[i].Stop()) {
+						inTime = true;
+						break;
+					}
+				}
+				if (inTime) {
+					agileEvt = it->second;
+					if ((agileEvt[4] >= params.emin && agileEvt[4] <= params.emax) &&
+							(agileEvt[3] > params.albrad) &&
+							(agileEvt[2] < params.fovradmax && agileEvt[2] >= params.fovradmin) &&
+							(agileEvt[1] == params.phasecode) &&
+							(agileEvt[0] == params.filtercode)) {
+
+						//Condizioni soddisfatte
+						ra.push_back(agileEvt[6]);
+						dec.push_back(agileEvt[5]);
+
+					}
+				}
+			}
+
+		}
+
+	#endif
+
+	#ifdef COMPOSITE_KEY
+
+		Astro::agileEvtKey key;
+		Astro::agileEvt evt;
+
+		for(it=DBEvt.begin(); it != DBEvt.end(); ++it){
+			key = it->first;
+			if (params.intervals.Count() == 1) {
+				if (key.time >= params.intervals[0].Start() && key.time <= params.intervals[0].Stop) {
+					evt = it->second;
+					if ((key.energy >= params.emin && key.energy <= params.emax) &&
+							(evt[3] > params.albrad) &&
+							(key.theta < params.fovradmax && key.yheta >= params.fovradmin) &&
+							(evt[1] == params.phasecode) &&
+							(evt[0] == params.filtercode)) {
+
+						//Condizioni soddisfatte
+						ra.push_back(key.ra);
+						dec.push_back(key.dec);
+
+					}
+				}
+			} else {
+				bool inTime = false;
+				for (int i=0; i<params.intervals.Count(); ++i) {
+					if (key.time >= params.intervals[i].Start && key.time <= params.intervals[i].Stop()) {
+						inTime = true;
+						break;
+					}
+				}
+				if (inTime) {
+					evt = it->second;
+					if ((key.energy >= params.emin && key.energy <= params.emax) &&
+							(evt[3] > params.albrad) &&
+							(key.theta < params.fovradmax && agileEvt[2] >= params.fovradmin) &&
+							(evt[1] == params.phasecode) &&
+							(evt[0] == params.filtercode)) {
+
+						//Condizioni soddisfatte
+						ra.push_back(key.ra);
+						dec.push_back(key.dec);
+
+					}
+				}
+			}
+		}
+
+	#endif
+
+		connection->close();
+		communicator->destroy();
+
+		return true;
 }
 
-//AB: questa funzione non serve. Noi facciamo accesso diretto al DB. Da ignorare
-static int addfile(fitsfile* iFile, const CtsGenParams& params)
-{
-
-    std::cout << "params.evtfile: " << params.evtfile << std::endl;
-
-    char buffer[1024];
-    int status = 0;
-    FILE *fp = fopen(params.evtfile, "r");
-    if (!fp) {
-        cerr << "Error opening file " << params.evtfile << endl;
-        return 104;
-    }
-
-    cout << "Intervals: " << String(params.intervals) << endl;
-
-    int hdutype = 0;
-    bool firstLog = true;
-    while (fgets(buffer , 40960, fp)) {
-        char name[FLEN_FILENAME];
-        double t1 = 0, t2 = 0;
-        sscanf(buffer, "%s %lf %lf", name, &t1, &t2);
-        Interval logIntv(t1, t2);
-        Intervals logSel = Intersection(params.intervals, logIntv);
-
-        if (logSel.Count())
-            cout << "Selecting from: " << name << endl;
-
-        for (int i=0; i<logSel.Count(); ++i) {
-            Intervals logSelInt;
-            logSelInt.Add(logSel[i]);
-            string exprStr = LogEvtString(logSelInt, params.emin, params.emax, params.albrad, params.fovradmax, params.fovradmin, params.phasecode, params.filtercode);
-            char expr[1024];
-            strcpy(expr, exprStr.c_str());
-            fitsfile* tempFits;
-            if (firstLog) {
-                if (fits_open_file(&tempFits, name, READONLY, &status) != 0 ) {
-                    cerr << "FITS Error " << status << " opening file " << name << endl;
-                    return status;
-                }
-                fits_copy_file(tempFits, iFile, 1, 1, 1, &status);
-                fits_movabs_hdu(iFile, 2, &hdutype, &status);
-                fits_select_rows(iFile, iFile, expr, &status);
-            }
-            else {
-                if (fits_open_file(&tempFits, name, READONLY, &status) != 0 ) {
-                    cerr << "FITS Error " << status << " opening file " << name << endl;
-                    return status;
-                }
-                fits_movabs_hdu(tempFits, 2, &hdutype, &status);
-                fits_select_rows(tempFits, iFile, expr, &status);
-            }
-            fits_close_file(tempFits, &status);
-            firstLog = false;
-        }
-    }
-    fclose(fp);
-    if (firstLog)
-        return 1005;
-    return status;
-}
+////questa è la funziona che contiene la query sui dati. Importante.
+////E' da rifare accedendo al BDB
+//static string LogEvtString(const Intervals& intvs, double emin, double emax, double albrad, double fovradmax, double fovradmin, int phasecode, int filtercode)
+//{
+//	//se Count() == 0 non si calcola la mappa
+//    if (intvs.Count()<=0)
+//        return string("");
+//    stringstream str(ios_base::out);
+//    str.precision(6);
+//    //se Count() > 0 si calcola la mappa.
+//    //se Count() > 1 allora abbiamo una lista di tempi Start() e Stop().
+//    //per ora noi possiamo ignorare questo e considerare per semplicità solo un tstart ed un tstop.
+//
+//    if (intvs.Count()==1)
+//        str << "TIME >= " << fixed << intvs[0].Start() << " && TIME <= " << intvs[0].Stop();
+//    else {
+//        str << "( ";
+//        const char* sep = "";
+//        for (int i=0; i<intvs.Count(); ++i) {
+//            str << sep << " ( TIME >= " << fixed << intvs[i].Start() << " && TIME <= " << intvs[i].Stop() << " )";
+//            sep = " ||";
+//        }
+//        str << " )";
+//    }
+//
+//    str << " && ENERGY >= " << emin;
+//    str << " && ENERGY <= " << emax;
+//    str << " && PH_EARTH > " << albrad;
+//    str << " && THETA < " << fovradmax;
+//    str << " && THETA >= " << fovradmin;
+//
+//    if ((phasecode & 1) == 1)
+//        str << " && PHASE .NE. 0";
+//    if ((phasecode & 2) == 2)
+//        str << " && PHASE .NE. 1";
+//    if ((phasecode & 4) == 4)
+//        str << " && PHASE .NE. 2";
+//    if ((phasecode & 8) == 8)
+//        str << " && PHASE .NE. 3";
+//    if ((phasecode & 16) == 16)
+//        str << " && PHASE .NE. 4";
+//
+//    if ((filtercode & 1) == 1)
+//        str << " && EVSTATUS .NE. 'L'";
+//    if ((filtercode & 2) == 2)
+//        str << " && EVSTATUS .NE. 'G'";
+//    if ((filtercode & 4) == 4)
+//        str << " && EVSTATUS .NE. 'S'";
+//
+//    return str.str();
+//}
+//
+////AB: questa funzione non serve. Noi facciamo accesso diretto al DB. Da ignorare
+//static int addfile(fitsfile* iFile, const CtsGenParams& params)
+//{
+//
+//    std::cout << "params.evtfile: " << params.evtfile << std::endl;
+//
+//    char buffer[1024];
+//    int status = 0;
+//    FILE *fp = fopen(params.evtfile, "r");
+//    if (!fp) {
+//        cerr << "Error opening file " << params.evtfile << endl;
+//        return 104;
+//    }
+//
+//    cout << "Intervals: " << String(params.intervals) << endl;
+//
+//    int hdutype = 0;
+//    bool firstLog = true;
+//    while (fgets(buffer , 40960, fp)) {
+//        char name[FLEN_FILENAME];
+//        double t1 = 0, t2 = 0;
+//        sscanf(buffer, "%s %lf %lf", name, &t1, &t2);
+//        Interval logIntv(t1, t2);
+//        Intervals logSel = Intersection(params.intervals, logIntv);
+//
+//        if (logSel.Count())
+//            cout << "Selecting from: " << name << endl;
+//
+//        for (int i=0; i<logSel.Count(); ++i) {
+//            Intervals logSelInt;
+//            logSelInt.Add(logSel[i]);
+//            string exprStr = LogEvtString(logSelInt, params.emin, params.emax, params.albrad, params.fovradmax, params.fovradmin, params.phasecode, params.filtercode);
+//            char expr[1024];
+//            strcpy(expr, exprStr.c_str());
+//            fitsfile* tempFits;
+//            if (firstLog) {
+//                if (fits_open_file(&tempFits, name, READONLY, &status) != 0 ) {
+//                    cerr << "FITS Error " << status << " opening file " << name << endl;
+//                    return status;
+//                }
+//                fits_copy_file(tempFits, iFile, 1, 1, 1, &status);
+//                fits_movabs_hdu(iFile, 2, &hdutype, &status);
+//                fits_select_rows(iFile, iFile, expr, &status);
+//            }
+//            else {
+//                if (fits_open_file(&tempFits, name, READONLY, &status) != 0 ) {
+//                    cerr << "FITS Error " << status << " opening file " << name << endl;
+//                    return status;
+//                }
+//                fits_movabs_hdu(tempFits, 2, &hdutype, &status);
+//                fits_select_rows(tempFits, iFile, expr, &status);
+//            }
+//            fits_close_file(tempFits, &status);
+//            firstLog = false;
+//        }
+//    }
+//    fclose(fp);
+//    if (firstLog)
+//        return 1005;
+//    return status;
+//}
 
 
 //questa è la funzione che calcola le mappe. 
@@ -205,18 +338,18 @@ int calculateMaps(CtsGenParams & params)
     }*/
 	Ice::InitializationData initData;
 	initData.properties = Ice::createProperties();
-	//initData.properties->load("config");
+	initData.properties->load("config");
 
 	// Initialize the Communicator.
 	Ice::CommunicatorPtr communicator = Ice::initialize(initData);
 
 	// Create a Freeze database connection.
-	Freeze::ConnectionPtr connection = Freeze::createConnection(communicator, "db");
+	Freeze::ConnectionPtr connection = Freeze::createConnection(communicator, "dbagilesimple");
 
     const double obtlimit = 104407200.;
     if (params.tmin<obtlimit)
         status = 1005;
-    else
+    //else
         //status = addfile(evtFits, params);
     std::cout << "AG_ctsmapgen0...................................addfile exiting STATUS : "<< status<< std::endl << std::endl ;
 
@@ -233,25 +366,27 @@ int calculateMaps(CtsGenParams & params)
     //fits_movabs_hdu(evtFits, 2, NULL, &status);
     //fits_get_num_rows(evtFits, &nrows, &status);
 
-	vector<double> ra,dec;
-	//The map
-	DBAgileEvt DBEvt(connection,"DBAgileEvt");
-	//The iterator
-	DBAgileEvt::iterator it;
-	//The evt vector
-	Astro::agileEvt agileEvt;
+	vector<float> ra,dec;
+//	//The map
+//	DBAgileEvt DBEvt(connection,"DBAgileEvt");
+//	//The iterator
+//	DBAgileEvt::iterator it;
+//	//The evt vector
+//	Astro::agileEvt agileEvt;
+//
+//	//populate ra and dec
+//	//popolato con log_earth__ra e log_earth_dec
+//	for(it=DBEvt.begin(); it != DBEvt.end(); ++it){
+//		cout << it->first << endl;
+//		agileEvt = it->second;
+//		ra.push_back(agileEvt[6]);
+//		dec.push_back(agileEvt[5]);
+//	}
+//	nrows = ra.size();
+////	exit(0);
 
-	//populate ra and dec
-	//popolato con log_earth__ra e log_earth_dec
-	for(it=DBEvt.begin(); it != DBEvt.end(); ++it){
-		cout << it->first << endl;
-		agileEvt = it->second;
-		ra.push_back(agileEvt[6]);
-		dec.push_back(agileEvt[5]);
-	}
+    LogEvtString(params, ra, dec);
 	nrows = ra.size();
-	exit(0);
-	
     cout << nrows << endl;
     //double ra, dec;
     switch (params.projection) {
