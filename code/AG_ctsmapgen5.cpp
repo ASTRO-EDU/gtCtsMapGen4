@@ -29,7 +29,7 @@
 #include <AstroMap.h>
 
 #define SIMPLE_KEY
-#define COMPOSITE_KEY
+//#define COMPOSITE_KEY
 
 using namespace std;
 
@@ -69,13 +69,12 @@ static bool LogEvtString(CtsGenParams params, vector<float>& ra, vector<float>& 
 
 	// Create a Freeze database connection.
 	Freeze::ConnectionPtr connection = Freeze::createConnection(communicator, "dbagilesimple");
-
+	#ifdef SIMPLE_KEY
 	//The map
 	DBAgileEvt DBEvt(connection,"DBAgileEvt");
 	//The iterator
 	DBAgileEvt::iterator it;
 
-	#ifdef SIMPLE_KEY
 		//The evt vector
 		Astro::agileEvt agileEvt;
 		cout << "start query " << endl;
@@ -129,17 +128,26 @@ static bool LogEvtString(CtsGenParams params, vector<float>& ra, vector<float>& 
 
 	#ifdef COMPOSITE_KEY
 
+		//Create the vector to store into BDB
+		cout << "<agileEvtKey, double>" << endl;
+
+		//The map
+		AgileEvtMapComplex DBEvt(connection, "DBAgileEvtComplex");
+
+		//The iterator
+		AgileEvtMapComplex::iterator it;
+
 		Astro::agileEvtKey key;
 		Astro::agileEvt evt;
 
 		for(it=DBEvt.begin(); it != DBEvt.end(); ++it){
 			key = it->first;
 			if (params.intervals.Count() == 1) {
-				if (key.time >= params.intervals[0].Start() && key.time <= params.intervals[0].Stop) {
+				if ((key.time >= params.intervals[0].Start()) && (key.time <= params.intervals[0].Stop())) {
 					evt = it->second;
 					if ((key.energy >= params.emin && key.energy <= params.emax) &&
 							(evt[3] > params.albrad) &&
-							(key.theta < params.fovradmax && key.yheta >= params.fovradmin) &&
+							(key.theta < params.fovradmax && key.theta >= params.fovradmin) &&
 							(evt[1] == params.phasecode) &&
 							(evt[0] == params.filtercode)) {
 
@@ -152,7 +160,7 @@ static bool LogEvtString(CtsGenParams params, vector<float>& ra, vector<float>& 
 			} else {
 				bool inTime = false;
 				for (int i=0; i<params.intervals.Count(); ++i) {
-					if (key.time >= params.intervals[i].Start && key.time <= params.intervals[i].Stop()) {
+					if (key.time >= params.intervals[i].Start() && key.time <= params.intervals[i].Stop()) {
 						inTime = true;
 						break;
 					}
@@ -161,7 +169,7 @@ static bool LogEvtString(CtsGenParams params, vector<float>& ra, vector<float>& 
 					evt = it->second;
 					if ((key.energy >= params.emin && key.energy <= params.emax) &&
 							(evt[3] > params.albrad) &&
-							(key.theta < params.fovradmax && agileEvt[2] >= params.fovradmin) &&
+							(key.theta < params.fovradmax && key.theta >= params.fovradmin) &&
 							(evt[1] == params.phasecode) &&
 							(evt[0] == params.filtercode)) {
 
